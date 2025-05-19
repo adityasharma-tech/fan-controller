@@ -27,87 +27,15 @@ const String localIPURL = "/";  // a string version of the local IP with http, u
 
 // HTML content
 const char index_html[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>ESP32 Fan Controller</title>
-  <style>
-    body {
-      font-family: sans-serif;
-      background: #111;
-      color: #eee;
-      text-align: center;
-      padding: 20px;
-    }
-    .slider {
-      width: 80%;
-      margin: 20px auto;
-    }
-    .rpm {
-      margin: 10px;
-      font-size: 1.2em;
-    }
-    .label {
-      margin-top: 30px;
-    }
-    input[type=range] {
-      width: 100%;
-    }
-    button {
-      padding: 10px 20px;
-      font-size: 1em;
-      margin-top: 20px;
-    }
-  </style>
-</head>
-<body>
-  <h1>ESP32 Fan Controller</h1>
 
-  <div id="rpmContainer">
-    <div class="rpm">Fan 1 RPM: <span id="rpm1">-</span></div>
-    <div class="rpm">Fan 2 RPM: <span id="rpm2">-</span></div>
-    <div class="rpm">Fan 3 RPM: <span id="rpm3">-</span></div>
-    <div class="rpm">Fan 4 RPM: <span id="rpm4">-</span></div>
-  </div>
 
-  <div class="label">Set PWM Duty Cycle:</div>
-  <div class="slider">
-    <input type="range" min="1" max="100" value="30" id="pwmSlider" oninput="updatePWM(this.value)">
-    <div>Current PWM: <span id="pwmValue">30</span>%</div>
-    <button onclick="savePWM()">Save</button>
-  </div>
 
-  <script>
-    function updatePWM(val) {
-      document.getElementById("pwmValue").innerText = val;
-    }
 
-    function savePWM() {
-      const pwm = document.getElementById("pwmSlider").value;
-      fetch("/savePWM?value="+pwm)
-    }
 
-    // Simulate live RPM updates (mock)
-    setInterval(() => {
-      fetch("/getRPM").then(res => res.json()).then(data => {
-        console.log(data);
-        for (let i = 1; i <= 4; i++) {
-          document.getElementById("rpm" + i).innerText = data[i-1];
-        }
-      })
-    }, 1000);
 
-    window.addEventListener("load", ()=>{
-      fetch("/getPWM").then(res => res.json()).then(data => {
-        console.log(data);
-        document.getElementById("pwmSlider").value = data.value
-        updatePWM(data.value)
-      })
-    })
-  </script>
-</body>
-</html>
+
+
+
 
 )rawliteral";
 
@@ -251,7 +179,6 @@ void setUpWebserver(AsyncWebServer &server, const IPAddress &localIP) {
       }
       request->send(200, "text/html", "");
     }
-    request->send(404);
   });
 
   server.on("/getRPM", [](AsyncWebServerRequest *request) {
@@ -270,8 +197,6 @@ void setUpWebserver(AsyncWebServer &server, const IPAddress &localIP) {
     preferences.end();
     request->send(200, "application/json", "{ \"value\": " + String(pwmPercent) + " }");
   });
-
-
 }
 
 // wifi setup end
