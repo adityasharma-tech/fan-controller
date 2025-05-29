@@ -263,12 +263,7 @@ const char index_html[] PROGMEM = R"=====(
     <div class="app">
       <div class="app-header">
         <h1 class="header-title">Fan Controller</h1>
-        <button
-          onclick="() => setMasterRunning(!masterRunning)"
-          class="master-button"
-        >
-          Start Master
-        </button>
+        <button id="master-button" style="padding: 0.5rem 1.5rem;" onclick="toogleMaster()" aria-checked="false" class="custom-button">Master stopped</button>
       </div>
 
       <div id="grid" class="fan-grid"></div>
@@ -277,7 +272,7 @@ const char index_html[] PROGMEM = R"=====(
       const renderControlElement = (ix, fan) => {
         return `<div class="bg-dark rounded-lg px-5 py-5">
             <div>
-              <button onclick="toogleFan(${ix})" aria-checked="${fan.on ? "true": "false"}" class="custom-button ring ring-3">Fan ${
+              <button onclick="toogleFan(${ix})" aria-checked="${fan.on ? "true": "false"}" class="custom-button">Fan ${
                 ix + 1
               } Running</button>
             </div>
@@ -342,9 +337,27 @@ const char index_html[] PROGMEM = R"=====(
           });
 
           rangeControl.addEventListener("change", (evt) => {
-            // TODO: Handle change slider
+            fetch(`/update-speed?fanIndex=${ix}&updateValue=${evt.target.value}`)
           });
         });
+
+        const masterData = await fetch("/server-stats");
+        const masterResponse = await masterData.json();
+        const button = document.getElementById("master-button")
+        if(masterResponse.success){
+          button.textContent = "Master running";
+          button.ariaChecked = "true";
+        } else {
+          button.textContent = "Master stopped";
+          button.ariaChecked = "false";
+        }
+      }
+
+      function toogleMaster(){
+        fetch("/toogle-master");
+        const button = document.getElementById("master-button")
+        button.ariaChecked == "true" ? button.textContent = "Master stopped" : button.textContent = "Master running";
+        button.ariaChecked == "true" ? button.ariaChecked = "false" : button.ariaChecked = "true";       
       }
 
       function toogleFan(idx) {
@@ -354,6 +367,8 @@ const char index_html[] PROGMEM = R"=====(
         const element = Array.from(grid.children)[idx].querySelector(
           "div button.custom-button"
         );
+
+        fetch(`/toogle-fan?fanIndex=${idx}`)
 
         element.ariaChecked == "true" ? element.textContent = `Fan ${idx} Stopped` : element.textContent = `Fan ${idx} Running`;
         element.ariaChecked == "true" ? element.ariaChecked = "false" : element.ariaChecked = "true";
@@ -376,13 +391,13 @@ const pcnt_unit_t pcntUnits[4] = {
 
 const int pwmPercent = 30;
 int pwmDuty = (255 * pwmPercent) / 100;
-uint32_t lastRPM[4] = {0};
+uint32_t lastRPM[4] = { 0 };
 
 // Fan Controller - Define Pins
 bool masterOn = true;
 const int pwmPins[4] = { 32, 33, 27, 19 };
 const int tachPins[4] = { 15, 16, 17, 18 };
-const int mosfetPins[4] = { 14, 24, 13, 26 }; 
+const int mosfetPins[4] = { 14, 24, 13, 26 };
 
 // Server Variables
 DNSServer dnsServer;
@@ -390,183 +405,222 @@ AsyncWebServer server(80);
 
 // Captive Portal - Functions
 void setUpDNSServer(DNSServer &dnsServer, const IPAddress &localIP) {
-    #define DNS_INTERVAL 30
-	dnsServer.setTTL(3600);
-	dnsServer.start(53, "*", localIP);
+#define DNS_INTERVAL 30
+  dnsServer.setTTL(3600);
+  dnsServer.start(53, "*", localIP);
 }
 
 void startSoftAccessPoint(const char *ssid, const char *password, const IPAddress &localIP, const IPAddress &gatewayIP) {
-	WiFi.mode(WIFI_MODE_AP);
-	const IPAddress subnetMask(255, 255, 255, 0);
-	WiFi.softAPConfig(localIP, gatewayIP, subnetMask);
-	WiFi.softAP(ssid, password, WIFI_CHANNEL, 0, MAX_CLIENTS);
-	esp_wifi_stop();
-	esp_wifi_deinit();
-	wifi_init_config_t my_config = WIFI_INIT_CONFIG_DEFAULT();
-	my_config.ampdu_rx_enable = false;
-	esp_wifi_init(&my_config);
-	esp_wifi_start();
-	vTaskDelay(100 / portTICK_PERIOD_MS);
+  WiFi.mode(WIFI_MODE_AP);
+  const IPAddress subnetMask(255, 255, 255, 0);
+  WiFi.softAPConfig(localIP, gatewayIP, subnetMask);
+  WiFi.softAP(ssid, password, WIFI_CHANNEL, 0, MAX_CLIENTS);
+  esp_wifi_stop();
+  esp_wifi_deinit();
+  wifi_init_config_t my_config = WIFI_INIT_CONFIG_DEFAULT();
+  my_config.ampdu_rx_enable = false;
+  esp_wifi_init(&my_config);
+  esp_wifi_start();
+  vTaskDelay(100 / portTICK_PERIOD_MS);
 }
 
 void setUpWebserver(AsyncWebServer &server, const IPAddress &localIP) {
-	server.on("/connecttest.txt", [](AsyncWebServerRequest *request) { request->redirect("http://logout.net"); });
-	server.on("/wpad.dat", [](AsyncWebServerRequest *request) { request->send(404); });
+  server.on("/connecttest.txt", [](AsyncWebServerRequest *request) {
+    request->redirect("http://logout.net");
+  });
+  server.on("/wpad.dat", [](AsyncWebServerRequest *request) {
+    request->send(404);
+  });
 
-	server.on("/generate_204", [](AsyncWebServerRequest *request) { request->redirect(localIPURL); });
-	server.on("/redirect", [](AsyncWebServerRequest *request) { request->redirect(localIPURL); });
-	server.on("/hotspot-detect.html", [](AsyncWebServerRequest *request) { request->redirect(localIPURL); });
-	server.on("/canonical.html", [](AsyncWebServerRequest *request) { request->redirect(localIPURL); });
-	server.on("/success.txt", [](AsyncWebServerRequest *request) { request->send(200); });
-	server.on("/ncsi.txt", [](AsyncWebServerRequest *request) { request->redirect(localIPURL); });
+  server.on("/generate_204", [](AsyncWebServerRequest *request) {
+    request->redirect(localIPURL);
+  });
+  server.on("/redirect", [](AsyncWebServerRequest *request) {
+    request->redirect(localIPURL);
+  });
+  server.on("/hotspot-detect.html", [](AsyncWebServerRequest *request) {
+    request->redirect(localIPURL);
+  });
+  server.on("/canonical.html", [](AsyncWebServerRequest *request) {
+    request->redirect(localIPURL);
+  });
+  server.on("/success.txt", [](AsyncWebServerRequest *request) {
+    request->send(200);
+  });
+  server.on("/ncsi.txt", [](AsyncWebServerRequest *request) {
+    request->redirect(localIPURL);
+  });
 
-	server.on("/favicon.ico", [](AsyncWebServerRequest *request) { request->send(404); });
+  server.on("/favicon.ico", [](AsyncWebServerRequest *request) {
+    request->send(404);
+  });
 
-	server.on("/", HTTP_ANY, [](AsyncWebServerRequest *request) {
-		AsyncWebServerResponse *response = request->beginResponse(200, "text/html", index_html);
-		response->addHeader("Cache-Control", "public,max-age=31536000");
-		request->send(response);
-		Serial.println("Served Basic HTML Page");
-	});
+  server.on("/", HTTP_ANY, [](AsyncWebServerRequest *request) {
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/html", index_html);
+    response->addHeader("Cache-Control", "public,max-age=31536000");
+    request->send(response);
+    Serial.println("Served Basic HTML Page");
+  });
 
-    // apis
-    server.on("/toogle-master", [](AsyncWebServerRequest *request){
-        // set all the mosfets to off
-        for (int i = 0; i < 4; i++) {
-            if(masterOn){
-                digitalWrite(mosfetPins[i], LOW);
-            } else {
-                digitalWrite(mosfetPins[i], HIGH);
-            }
-        }
-        masterOn = !masterOn;
+  // apis
+  server.on("/toogle-master", [](AsyncWebServerRequest *request) {
+    // set all the mosfets to off
+    for (int i = 0; i < 4; i++) {
+      if (masterOn) {
+        digitalWrite(mosfetPins[i], LOW);
+      } else {
+        digitalWrite(mosfetPins[i], HIGH);
+      }
+    }
+    masterOn = !masterOn;
 
-        request->send(200, "application/json", "{ \"success\": \"true\" }");
-    });
+    request->send(200, "application/json", "{ \"success\": \"true\" }");
+  });
 
-    server.on("/fan-info", [](AsyncWebServerRequest *request){
-        preferences.begin("speed", true);
-        String json = "[";
-        for (int i = 0; i < 4; i++) {
-            int fanSpeed = preferences.getInt("fan" + char(i), 30);
-            json += "{ \"rpm\":";
-            json += String(lastRPM[i]);
-            json += ",\"status\": ";
-            json += String(digitalRead(mosfetPins[i]));
-            json += ",\"pwm\":";
-            json += String(fanSpeed);
-            json += "}";
-            if (i < 3) json += ",";
-        }
-        json += "]";
+  server.on("/fan-info", [](AsyncWebServerRequest *request) {
+    digitalWrite(2, 1);
+    preferences.begin("speed", true);
 
-        request->send(200, "application/json", json);
-    });
-
+    Serial.println("Reading preferences...");
+    Serial.println(preferences.getInt("fan0", -1));
     
+    String json = "[";
+    for (int i = 0; i < 4; i++) {
+      char name[10];
+      sprintf(name, "fan%d", i);
+      int fanSpeed = preferences.getInt(name, 30);
+      json += "{ \"rpm\":";
+      json += String(lastRPM[i]);
+      json += ",\"status\": ";
+      json += String(digitalRead(mosfetPins[i]));
+      json += ",\"pwm\":";
+      json += String(fanSpeed);
+      json += "}";
+      if (i < 3) json += ",";
+    }
+    preferences.end();
+    json += "]";
 
-    server.on("/server-stats", [](AsyncWebServerRequest *request) {
-        // Empty for now...
-    });
+    request->send(200, "application/json", json);
+    delayMicroseconds(500);
+    digitalWrite(2, 0);
+  });
 
-    server.on("/reset-prefs", [](AsyncWebServerRequest *request) {
-        // ...
-    });
 
-    server.on("/update-speed", [](AsyncWebServerRequest *request) {
-        if(request->hasArg("fanIndex") && request->hasArg("updateValue")){
-            int fanIndex = request->arg("fanIndex").toInt();
-            int updateValue = request->arg("updateValue").toInt();
-            updateValue = constrain(updateValue, 1, 100);
-            
-            preferences.begin("speed", false);
-            preferences.putInt("fan" + char(fanIndex), updateValue);
-            preferences.end();
 
-            //TODO: update the speed
-            ledcWrite(pwmChannels[fanIndex], updateValue);
+  server.on("/reset-prefs", [](AsyncWebServerRequest *request) {
+    // Empty for now...
+  });
 
-            request->send(200, "application/json", "{ \"success\": \"true\" }");
-        }
-        request->send(400, "application/json", "{ \"error\": \"Failed to get query parameters.\" }");
-    });
+  server.on("/server-stats", [](AsyncWebServerRequest *request) {
+    String json = "{ \"success\": ";
+    if(masterOn){
+      json += "true";
+    } else {
+      json += "false";
+    }
+    json+="}";
+    return request->send(200, "application/json", json);
+  });
 
-    server.on("/toogle-fan", [](AsyncWebServerRequest *request) {
-        if(request->hasArg("fanIndex")){
-            int fanIndex = request->arg("fanIndex").toInt();
-            
-            int state = digitalRead(mosfetPins[fanIndex]);
+  server.on("/update-speed", [](AsyncWebServerRequest *request) {
+    if (request->hasArg("fanIndex") && request->hasArg("updateValue")) {
+      int fanIndex = request->arg("fanIndex").toInt();
+      int updateValue = request->arg("updateValue").toInt();
+      updateValue = constrain(updateValue, 1, 100);
 
-            if(state == 1){
-                digitalWrite(mosfetPins[fanIndex], 0);
-            } else {
-                digitalWrite(mosfetPins[fanIndex], 1);
-            }
+      preferences.begin("speed", false);
+      char name[10];
+      sprintf(name, "fan%d", fanIndex);
+      preferences.putInt(name, updateValue);
+      preferences.end();
 
-            request->send(200, "application/json", "{ \"success\": \"true\" }");
-        }
-        request->send(400, "application/json", "{ \"error\": \"Failed to get query parameters.\" }");
-    });
+      //TODO: update the speed
+      ledcWrite(pwmChannels[fanIndex], updateValue);
 
-	server.onNotFound([](AsyncWebServerRequest *request) {
-		request->redirect(localIPURL);
-		Serial.print("onnotfound ");
-		Serial.print(request->host());
-		Serial.print(" ");
-		Serial.print(request->url());
-		Serial.print(" sent redirect to " + localIPURL + "\n");
-	});
+      return request->send(200, "application/json", "{ \"success\": \"true\" }");
+    }
+    request->send(400, "application/json", "{ \"error\": \"Failed to get query parameters.\" }");
+  });
+
+  server.on("/toogle-fan", [](AsyncWebServerRequest *request) {
+    Serial.print("toogle fan: ");
+    Serial.println(request->arg("fanIndex"));
+    if (request->hasArg("fanIndex")) {
+      int fanIndex = request->arg("fanIndex").toInt();
+
+      int state = digitalRead(mosfetPins[fanIndex]);
+
+      if (state == 1) {
+        digitalWrite(mosfetPins[fanIndex], 0);
+      } else {
+        digitalWrite(mosfetPins[fanIndex], 1);
+      }
+
+      return request->send(200, "application/json", "{ \"success\": \"true\" }");
+    }
+    request->send(400, "application/json", "{ \"error\": \"Failed to get query parameters.\" }");
+  });
+
+  server.onNotFound([](AsyncWebServerRequest *request) {
+    request->redirect(localIPURL);
+    Serial.print("onnotfound ");
+    Serial.print(request->host());
+    Serial.print(" ");
+    Serial.print(request->url());
+    Serial.print(" sent redirect to " + localIPURL + "\n");
+  });
 }
 
 // Fan Controller - Functions
-void setupController(){
-    masterOn = true;
-    for (int i = 0; i < 4; i++) {
-        pinMode(mosfetPins[i], OUTPUT);
-        digitalWrite(mosfetPins[i], HIGH);
-    }
+void setupController() {
+  masterOn = true;
+  for (int i = 0; i < 4; i++) {
+    pinMode(mosfetPins[i], OUTPUT);
+    digitalWrite(mosfetPins[i], HIGH);
+  }
 
-    ledc_timer_config_t ledc_timer = {
+  ledc_timer_config_t ledc_timer = {
     .speed_mode = LEDC_LOW_SPEED_MODE,
     .duty_resolution = LEDC_TIMER_8_BIT,
     .timer_num = LEDC_TIMER_0,
     .freq_hz = 25000,
     .clk_cfg = LEDC_AUTO_CLK
-    };
-    ledc_timer_config(&ledc_timer);
+  };
+  ledc_timer_config(&ledc_timer);
 
-    for (int i = 0; i < 4; i++) {
-        ledc_channel_config_t channel = {
-        .gpio_num = pwmPins[i],
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .channel = pwmChannels[i],
-        .intr_type = LEDC_INTR_DISABLE,
-        .timer_sel = LEDC_TIMER_0,
-        .duty = pwmDuty,
-        .hpoint = 0
-        };
-        ledc_channel_config(&channel);
-    }
-    for (int i = 0; i < 4; i++) {
-        pcnt_config_t pcnt_config = {
-        .pulse_gpio_num = tachPins[i],
-        .ctrl_gpio_num = PCNT_PIN_NOT_USED,
-        .lctrl_mode = PCNT_MODE_KEEP,
-        .hctrl_mode = PCNT_MODE_KEEP,
-        .pos_mode = PCNT_COUNT_INC,
-        .neg_mode = PCNT_COUNT_DIS,
-        .counter_h_lim = 10000,
-        .counter_l_lim = 0,
-        .unit = pcntUnits[i],
-        .channel = PCNT_CHANNEL_0
-        };
-        pcnt_unit_config(&pcnt_config);
-        pcnt_set_filter_value(pcntUnits[i], 1000);
-        pcnt_filter_enable(pcntUnits[i]);
-        pcnt_counter_pause(pcntUnits[i]);
-        pcnt_counter_clear(pcntUnits[i]);
-        pcnt_counter_resume(pcntUnits[i]);
-    }
+  for (int i = 0; i < 4; i++) {
+    ledc_channel_config_t channel = {
+      .gpio_num = pwmPins[i],
+      .speed_mode = LEDC_LOW_SPEED_MODE,
+      .channel = pwmChannels[i],
+      .intr_type = LEDC_INTR_DISABLE,
+      .timer_sel = LEDC_TIMER_0,
+      .duty = pwmDuty,
+      .hpoint = 0
+    };
+    ledc_channel_config(&channel);
+  }
+  for (int i = 0; i < 4; i++) {
+    pcnt_config_t pcnt_config = {
+      .pulse_gpio_num = tachPins[i],
+      .ctrl_gpio_num = PCNT_PIN_NOT_USED,
+      .lctrl_mode = PCNT_MODE_KEEP,
+      .hctrl_mode = PCNT_MODE_KEEP,
+      .pos_mode = PCNT_COUNT_INC,
+      .neg_mode = PCNT_COUNT_DIS,
+      .counter_h_lim = 10000,
+      .counter_l_lim = 0,
+      .unit = pcntUnits[i],
+      .channel = PCNT_CHANNEL_0
+    };
+    pcnt_unit_config(&pcnt_config);
+    pcnt_set_filter_value(pcntUnits[i], 1000);
+    pcnt_filter_enable(pcntUnits[i]);
+    pcnt_counter_pause(pcntUnits[i]);
+    pcnt_counter_clear(pcntUnits[i]);
+    pcnt_counter_resume(pcntUnits[i]);
+  }
 }
 
 void handleClientTask(void *parameter) {
@@ -577,55 +631,58 @@ void handleClientTask(void *parameter) {
   }
 }
 
-void setup(){
-    Serial.setTxBufferSize(1024);
-    Serial.begin(115200);
+void setup() {
+  pinMode(2, OUTPUT);
 
-    while (!Serial)
-        ;
 
-    
-    Serial.println("\n\nCaptive Test, V0.5.0 compiled " __DATE__ " " __TIME__ " by CD_FER");
-	Serial.printf("%s-%d\n\r", ESP.getChipModel(), ESP.getChipRevision());
-    
-    // ...
-    setupController();
-    startSoftAccessPoint(ssid, password, localIP, gatewayIP);
-    setUpDNSServer(dnsServer, localIP);
-    setUpWebserver(server, localIP);
-    server.begin();
+  Serial.setTxBufferSize(1024);
+  Serial.begin(115200);
 
-    Serial.print("\n");
-	Serial.print("Startup Time:");
-	Serial.println(millis());
-	Serial.print("\n");
+  while (!Serial)
+    ;
 
-    xTaskCreatePinnedToCore(
-        handleClientTask,  // Task function
-        "WebServerTask",   // Task name
-        4096,              // Stack size
-        NULL,              // Task input parameter
-        1,                 // Priority (1 is low, higher = more)
-        NULL,              // Task handle
-        0                  // Core 0
-    );
+
+  Serial.println("\n\nCaptive Test, V0.5.0 compiled " __DATE__ " " __TIME__ " by CD_FER");
+  Serial.printf("%s-%d\n\r", ESP.getChipModel(), ESP.getChipRevision());
+
+  // ...
+  setupController();
+  startSoftAccessPoint(ssid, password, localIP, gatewayIP);
+  setUpDNSServer(dnsServer, localIP);
+  setUpWebserver(server, localIP);
+  server.begin();
+
+  Serial.print("\n");
+  Serial.print("Startup Time:");
+  Serial.println(millis());
+  Serial.print("\n");
+
+  xTaskCreatePinnedToCore(
+    handleClientTask,  // Task function
+    "WebServerTask",   // Task name
+    4096,              // Stack size
+    NULL,              // Task input parameter
+    1,                 // Priority (1 is low, higher = more)
+    NULL,              // Task handle
+    0                  // Core 0
+  );
 }
 
-void loop(){
-    delay(1000);
+void loop() {
+  delay(1000);
 
-    int16_t count;
+  int16_t count;
 
-    Serial.print("RPMs: ");
-    for(int i = 0; i < 4; i++) {
-        pcnt_get_counter_value(pcntUnits[i], &count);
-        lastRPM[i] = count * 30;
-        pcnt_counter_clear(pcntUnits[i]);
-        Serial.print("Fan ");
-        Serial.print(i + 1);
-        Serial.print(": ");
-        Serial.print(lastRPM[i]);
-        Serial.print("  ");
-    }
-    Serial.println();
+  Serial.print("RPMs: ");
+  for (int i = 0; i < 4; i++) {
+    pcnt_get_counter_value(pcntUnits[i], &count);
+    lastRPM[i] = count * 30;
+    pcnt_counter_clear(pcntUnits[i]);
+    Serial.print("Fan ");
+    Serial.print(i + 1);
+    Serial.print(": ");
+    Serial.print(lastRPM[i]);
+    Serial.print("  ");
+  }
+  Serial.println();
 }
