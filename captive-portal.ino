@@ -25,7 +25,346 @@ const IPAddress subnetMask(255, 255, 255, 0);
 const String localIPURL = "/";
 
 const char index_html[] PROGMEM = R"=====(
+    <!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ESP32 Fan Controller</title>
+    <style>
+      *,
+      ::after,
+      ::before,
+      ::backdrop,
+      ::file-selector-button {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        border: 0 solid;
+      }
+      .app {
+        background: #222222;
+        color: #f5f5f5;
+        height: 100vh;
+        padding: 1rem;
+        overflow-y: auto;
+        font-family: sans-serif;
+      }
 
+      .app-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .header-title {
+        font-size: 1.5rem;
+        font-weight: 500;
+      }
+
+      .master-button {
+        background-color: #f5f5f5;
+        color: #141414;
+        font-weight: 500;
+        font-size: 1.3rem;
+        padding: 0.5rem 1.5rem;
+        border: 1px solid #141414;
+        border-radius: 0.55rem;
+        cursor: pointer;
+        min-width: 8rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+      }
+
+      .master-button.running {
+        background-color: #b91c1c;
+        color: white;
+        animation: pulse 2s infinite;
+        border-color: #7f1d1d;
+      }
+
+      .fan-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1rem;
+        padding-top: 1rem;
+        padding-bottom: 0.5rem;
+      }
+
+      @media (min-width: 1024px) {
+        .fan-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      .bg-dark {
+        background-color: #171717;
+      }
+
+      .rounded-lg {
+        border-radius: 0.5rem;
+      }
+
+      .px-5 {
+        padding-left: 1rem;
+        padding-right: 1rem;
+      }
+
+      .py-5 {
+        padding-top: 1rem;
+        padding-bottom: 1rem;
+      }
+
+      .fan-header {
+        display: flex;
+        justify-content: space-between;
+      }
+
+      .fan-toggle {
+        width: 3.5rem;
+        height: 2rem;
+        border-radius: 9999px;
+        position: relative;
+        cursor: pointer;
+        transition: background-color 0.3s ease;
+      }
+
+      .fan-toggle.off {
+        background-color: #d1d5db;
+      }
+
+      .fan-toggle.on {
+        background-color: #494949;
+      }
+
+      .fan-thumb {
+        position: absolute;
+        top: 0.2rem;
+        left: 0.23rem;
+        width: 1.6rem;
+        height: 1.6rem;
+        border-radius: 9999px;
+        background-color: white;
+        transition: transform 0.3s ease;
+      }
+
+      .fan-thumb.translate {
+        transform: translateX(1.5rem);
+      }
+
+      .range-container {
+        position: relative;
+        flex-grow: 1;
+        margin-top: 0.75rem;
+      }
+
+      .range-controls {
+        display: flex;
+        align-items: center;
+        gap: 1.25rem;
+      }
+
+      .range-value {
+        font-size: 2rem;
+        font-weight: 600;
+        color: #f5f5f5;
+        min-width: 80px;
+      }
+
+      .slider {
+        width: 100%;
+        height: 2rem;
+        border-radius: 3px;
+        appearance: none;
+        outline: none;
+        transition: opacity 0.2s;
+        background-color: #ffffff;
+      }
+
+      .slider::-webkit-slider-thumb {
+        appearance: none;
+        height: 2rem;
+        width: 1.2rem;
+        border-radius: 3px;
+        background-color: #fff;
+        cursor: pointer;
+        position: relative;
+        box-shadow: 0 0 0 0px #141414;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+    </style>
+    <style>
+      .custom-button {
+        appearance: button;
+        font: inherit;
+        font-feature-settings: inherit;
+        font-variation-settings: inherit;
+        letter-spacing: inherit;
+        font-weight: 600;
+        font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+          "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+
+        border-radius: 0.375rem;
+        padding-block: 0.40rem;
+        padding-inline: 1.25rem;
+        padding-left: 1.25rem;
+        padding-right: 1.25rem;
+
+        background-color: oklch(45.5% 0.188 13.697);
+        color: white;
+        cursor: pointer;
+        opacity: 1;
+        -webkit-text-size-adjust: 100%;
+        -webkit-tap-highlight-color: transparent;
+        tab-size: 4;
+
+        transition-property: color, background-color, border-color,
+          outline-color, text-decoration-color, fill, stroke, --tw-gradient-from,
+          --tw-gradient-via, --tw-gradient-to, opacity, box-shadow, transform,
+          translate, scale, rotate, filter, -webkit-backdrop-filter,
+          backdrop-filter, display, visibility, content-visibility, overlay,
+          pointer-events;
+        transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+        transition-duration: 150ms;
+
+        box-shadow: none;
+        box-sizing: border-box;
+        margin: 0;
+        border: 0 solid;
+      }
+
+      .custom-button:active {
+        box-shadow: 0 0 0 3px oklch(58.6% 0.253 17.585 / 0.3);
+      }
+
+      button[aria-checked="true"].custom-button:active {
+        box-shadow: 0 0 0 3px oklch(89.7% 0.196 126.665 / 0.3);
+      }
+
+      button[aria-checked="true"].custom-button {
+        background-color: oklch(89.7% 0.196 126.665);
+        color: oklch(20.5% 0 0);
+        box-shadow: 0 0 0 1px oklch(64.8% 0.2 131.684 / 0.3);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="app-header">
+        <h1 class="header-title">Fan Controller</h1>
+        <button
+          onclick="() => setMasterRunning(!masterRunning)"
+          class="master-button"
+        >
+          Start Master
+        </button>
+      </div>
+
+      <div id="grid" class="fan-grid"></div>
+    </div>
+    <script>
+      const renderControlElement = (ix, fan) => {
+        return `<div class="bg-dark rounded-lg px-5 py-5">
+            <div>
+              <button onclick="toogleFan(${ix})" aria-checked="${fan.on}" class="custom-button ring ring-3">Fan ${
+                ix + 1
+              } Running</button>
+            </div>
+
+            <div class="range-container">
+              <div class="range-controls">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value="${fan.speed}"
+                  style="background: linear-gradient(to right, #fff 0%, #fff ${
+                    fan.speed
+                  }%, #494949 ${fan.speed}%, #494949 100%);"
+                  class="slider"
+                />
+                <span class="range-value">${fan.speed}</span>
+              </div>
+            </div>
+          </div>`;
+      };
+
+      function main() {
+        const grid = document.getElementById("grid");
+        if (!grid) return;
+
+        let newData = [
+          Math.random() * 10000,
+          Math.random() * 10000,
+          Math.random() * 10000,
+          Math.random() * 10000,
+        ];
+
+        Array.from(grid.children).forEach((element, ix) => {
+          element.querySelector(
+            ".range-container .range-controls span"
+          ).textContent = Math.floor(newData[ix]);
+        });
+      }
+
+      function initialize() {
+        const grid = document.getElementById("grid");
+
+        const data = [50, 23, 50 ,30];
+
+        //   grid.innerHTML = "";
+        data.forEach((element, ix) => {
+          console.log(element);
+          grid.innerHTML += renderControlElement(ix, {
+            on: ix == 3 ? true : false,
+            speed: element,
+          });
+        });
+
+        Array.from(grid.children).forEach((element, ix) => {
+          const rangeControl = element.querySelector(
+            ".range-container .range-controls input"
+          );
+
+          rangeControl.addEventListener("input", (evt) => {
+            rangeControl.style[
+              "background"
+            ] = `linear-gradient(to right, #fff 0%, #fff ${evt.target.value}%, #494949 ${evt.target.value}%, #494949 100%)`;
+          });
+
+          rangeControl.addEventListener("change", (evt) => {
+            // TODO: Handle change slider
+          });
+        });
+      }
+
+      function toogleFan(idx) {
+        const grid = document.getElementById("grid");
+        if (!grid) return;
+
+        const element = Array.from(grid.children)[idx].querySelector(
+          "div button.custom-button"
+        );
+
+        element.ariaChecked == "true" ? element.textContent = `Fan ${idx} Stopped` : element.textContent = `Fan ${idx} Running`;
+        element.ariaChecked == "true" ? element.ariaChecked = "false" : element.ariaChecked = "true";
+      }
+      initialize();
+      setInterval(main, 1000);
+    </script>
+  </body>
+</html>
 )=====";
 
 // Fan Controller - Contants
