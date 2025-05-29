@@ -277,7 +277,7 @@ const char index_html[] PROGMEM = R"=====(
       const renderControlElement = (ix, fan) => {
         return `<div class="bg-dark rounded-lg px-5 py-5">
             <div>
-              <button onclick="toogleFan(${ix})" aria-checked="${fan.on}" class="custom-button ring ring-3">Fan ${
+              <button onclick="toogleFan(${ix})" aria-checked="${fan.on ? "true": "false"}" class="custom-button ring ring-3">Fan ${
                 ix + 1
               } Running</button>
             </div>
@@ -288,47 +288,45 @@ const char index_html[] PROGMEM = R"=====(
                   type="range"
                   min="0"
                   max="100"
-                  value="${fan.speed}"
+                  value="${fan.pwm}"
                   style="background: linear-gradient(to right, #fff 0%, #fff ${
-                    fan.speed
-                  }%, #494949 ${fan.speed}%, #494949 100%);"
+                    fan.pwm
+                  }%, #494949 ${fan.pwm}%, #494949 100%);"
                   class="slider"
                 />
-                <span class="range-value">${fan.speed}</span>
+                <span class="range-value">${fan.rpm}</span>
               </div>
             </div>
           </div>`;
       };
 
-      function main() {
+      async function main() {
         const grid = document.getElementById("grid");
         if (!grid) return;
 
-        let newData = [
-          Math.random() * 10000,
-          Math.random() * 10000,
-          Math.random() * 10000,
-          Math.random() * 10000,
-        ];
+        const request = await fetch("/fan-info");
+        const data = await request.json();
 
         Array.from(grid.children).forEach((element, ix) => {
           element.querySelector(
             ".range-container .range-controls span"
-          ).textContent = Math.floor(newData[ix]);
+          ).textContent = data[ix].rpm
         });
       }
 
-      function initialize() {
+      async function initialize() {
         const grid = document.getElementById("grid");
 
-        const data = [50, 23, 50 ,30];
+        const request = await fetch("/fan-info");
+        const data = await request.json();
 
         //   grid.innerHTML = "";
         data.forEach((element, ix) => {
           console.log(element);
           grid.innerHTML += renderControlElement(ix, {
-            on: ix == 3 ? true : false,
-            speed: element,
+            on: element.status,
+            pwm: element.pwm,
+            rpm: element.rpm
           });
         });
 
@@ -360,6 +358,7 @@ const char index_html[] PROGMEM = R"=====(
         element.ariaChecked == "true" ? element.textContent = `Fan ${idx} Stopped` : element.textContent = `Fan ${idx} Running`;
         element.ariaChecked == "true" ? element.ariaChecked = "false" : element.ariaChecked = "true";
       }
+
       initialize();
       setInterval(main, 1000);
     </script>
@@ -452,11 +451,11 @@ void setUpWebserver(AsyncWebServer &server, const IPAddress &localIP) {
             int fanSpeed = preferences.getInt("fan" + char(i), 30);
             json += "{ \"rpm\":";
             json += String(lastRPM[i]);
-            json += ",\"rpm\": \"";
+            json += ",\"status\": ";
             json += String(digitalRead(mosfetPins[i]));
-            json += "\",\"speed\":\"";
+            json += ",\"pwm\":";
             json += String(fanSpeed);
-            json += "\"}";
+            json += "}";
             if (i < 3) json += ",";
         }
         json += "]";
@@ -484,7 +483,7 @@ void setUpWebserver(AsyncWebServer &server, const IPAddress &localIP) {
             preferences.putInt("fan" + char(fanIndex), updateValue);
             preferences.end();
 
-            //TODO: update the speed 
+            //TODO: update the speed
             ledcWrite(pwmChannels[fanIndex], updateValue);
 
             request->send(200, "application/json", "{ \"success\": \"true\" }");
